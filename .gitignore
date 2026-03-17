@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.env
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Downloads cache
+backend/downloads/*.mp4
+backend/downloads/*.webm
+backend/downloads/*.mkv
+
+# Logs
+*.log
+
+# Docker volumes
+mysql_data/
+downloads_data/
+
+# Cursor
+.cursor/

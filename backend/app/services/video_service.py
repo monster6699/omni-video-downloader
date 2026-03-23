@@ -135,8 +135,68 @@ def _parse_height(resolution: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+DIRECT_LINK_PLATFORMS = {"youtube", "tiktok", "twitter", "instagram"}
+
+
 async def get_download_info(url: str, format_id: str | None = None) -> dict:
+    platform = detect_platform(url)
+
+    if platform in DIRECT_LINK_PLATFORMS:
+        direct = await _try_direct_download(url, format_id, platform)
+        if direct:
+            return direct
+
     return await _server_download(url, format_id)
+
+
+async def _try_direct_download(
+    url: str, format_id: str | None, platform: str
+) -> dict | None:
+    """Return a direct CDN URL for browser download, or None when merge / auth is needed."""
+    ydl_opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "format": format_id or "best",
+    }
+
+    cookies_file = settings.YOUTUBE_COOKIES_FILE
+    if cookies_file and platform == "youtube":
+        ydl_opts["cookiefile"] = cookies_file
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        if not info:
+            return None
+
+        # requested_formats indicates a merge is required (separate video + audio streams)
+        if info.get("requested_formats"):
+            return None
+
+        direct_url = info.get("url")
+        if not direct_url:
+            return None
+
+        vcodec = info.get("vcodec", "none")
+        acodec = info.get("acodec", "none")
+        if vcodec == "none" or acodec == "none":
+            return None
+
+        title = info.get("title", "video")
+        ext = info.get("ext", "mp4")
+        filename = f"{_sanitize_filename(title)}.{ext}"
+
+        logger.info("Direct link resolved for %s: %s", platform, filename)
+        return {
+            "download_url": direct_url,
+            "method": "direct",
+            "filename": filename,
+        }
+    except Exception as e:
+        logger.warning("Direct download failed for %s, falling back: %s", platform, e)
+        return None
 
 
 async def _server_download(url: str, format_id: str | None) -> dict:

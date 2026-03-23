@@ -4,6 +4,18 @@ __pycache__/
 *.egg-info/
 venv/
 .env
+.env.*
+!.env.example
+
+# Secrets & local credentials (never commit)
+client_secret*.json
+*credentials*.json
+payParams*.txt
+*.pem
+apiclient*.json
+
+# Runtime logs (may contain tokens / PII)
+backend/logs/
 
 # Node
 node_modules/

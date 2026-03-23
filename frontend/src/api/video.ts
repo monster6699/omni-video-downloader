@@ -5,9 +5,12 @@ const api = axios.create({
   timeout: 30000,
 })
 
-const downloadApi = axios.create({
-  baseURL: '/api',
-  timeout: 600000,
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
 })
 
 export interface VideoFormat {
@@ -28,10 +31,19 @@ export interface VideoInfo {
   formats: VideoFormat[]
 }
 
-export interface DownloadResult {
-  download_url: string
-  method: string
+export interface DownloadTaskResult {
+  task_id: string
+  status: string
+}
+
+export interface TaskStatus {
+  task_id: string
+  status: 'pending' | 'downloading' | 'done' | 'failed'
+  progress: number
+  download_url: string | null
   filename: string | null
+  method: string | null
+  error: string | null
 }
 
 export async function parseVideo(url: string): Promise<VideoInfo> {
@@ -39,10 +51,15 @@ export async function parseVideo(url: string): Promise<VideoInfo> {
   return data
 }
 
-export async function downloadVideo(url: string, formatId?: string): Promise<DownloadResult> {
-  const { data } = await downloadApi.post<DownloadResult>('/video/download', {
+export async function downloadVideo(url: string, formatId?: string): Promise<DownloadTaskResult> {
+  const { data } = await api.post<DownloadTaskResult>('/video/download', {
     url,
     format_id: formatId,
   })
+  return data
+}
+
+export async function getTaskStatus(taskId: string): Promise<TaskStatus> {
+  const { data } = await api.get<TaskStatus>(`/video/task/${taskId}`)
   return data
 }

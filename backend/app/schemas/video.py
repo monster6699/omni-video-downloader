@@ -32,3 +32,18 @@ class VideoDownloadResponse(BaseModel):
     download_url: str
     method: str  # "direct" or "server"
     filename: str | None = None
+
+
+class DownloadTaskResponse(BaseModel):
+    task_id: str
+    status: str
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str  # pending | downloading | done | failed
+    progress: int = 0
+    download_url: str | None = None
+    filename: str | None = None
+    method: str | None = None
+    error: str | None = None

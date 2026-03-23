@@ -1,42 +1,75 @@
 import logging
-from pathlib import Path
-from urllib.parse import unquote
 
 import requests as http_requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_optional_user
 from app.core.config import DOWNLOAD_PATH
+from app.core.database import get_db
+from app.core.task_dispatcher import dispatch_download
+from app.models.user import User
 from app.schemas.video import (
+    DownloadTaskResponse,
+    TaskStatusResponse,
     VideoDownloadRequest,
-    VideoDownloadResponse,
     VideoParseRequest,
     VideoParseResponse,
 )
-from app.services.video_service import get_download_info, parse_video
+from app.services.persist_service import upsert_video
+from app.services.task_service import query_task_status
+from app.services.video_service import parse_video
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/parse", response_model=VideoParseResponse)
-async def api_parse_video(req: VideoParseRequest):
+async def api_parse_video(
+    req: VideoParseRequest,
+    db: AsyncSession = Depends(get_db),
+):
     try:
         result = await parse_video(req.url)
+
+        try:
+            await upsert_video(
+                db,
+                url=req.url,
+                platform=result.get("platform", "unknown"),
+                title=result.get("title"),
+                duration=result.get("duration"),
+                thumbnail=result.get("thumbnail"),
+            )
+        except Exception:
+            logger.warning("Failed to persist video record", exc_info=True)
+
         return VideoParseResponse(**result)
     except Exception as e:
         logger.exception("Parse failed")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
 
 
-@router.post("/download", response_model=VideoDownloadResponse)
-async def api_download_video(req: VideoDownloadRequest):
+@router.post("/download", response_model=DownloadTaskResponse)
+async def api_download_video(
+    req: VideoDownloadRequest,
+    user: User | None = Depends(get_optional_user),
+):
     try:
-        result = await get_download_info(req.url, req.format_id)
-        return VideoDownloadResponse(**result)
+        task_id = await dispatch_download(req.url, req.format_id, user.id if user else None)
+        return DownloadTaskResponse(task_id=task_id, status="pending")
     except Exception as e:
-        logger.exception("Download failed")
-        raise HTTPException(status_code=400, detail=f"下载失败: {str(e)}")
+        logger.exception("Failed to create download task")
+        raise HTTPException(status_code=400, detail=f"创建下载任务失败: {str(e)}")
+
+
+@router.get("/task/{task_id}", response_model=TaskStatusResponse)
+async def api_task_status(task_id: str):
+    status = await query_task_status(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return TaskStatusResponse(**status)
 
 
 @router.get("/proxy/image")

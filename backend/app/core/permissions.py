@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request, status
+from fastapi.security.utils import get_authorization_scheme_param
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -92,8 +93,19 @@ async def check_ai_llm_access(
     """Logged-in: VIP / ai_quota. Anonymous: daily IP limit in Redis."""
     if user:
         await check_ai_quota(user, db)
-    else:
-        await check_anon_ai_quota(request)
+        return
+
+    # Client sent a Bearer token but we could not resolve a user (expired JWT, user
+    # deleted, etc.). Do not consume anonymous quota or show the anon-limit message.
+    auth = request.headers.get("Authorization")
+    scheme, param = get_authorization_scheme_param(auth)
+    if scheme.lower() == "bearer" and param.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="登录已失效或 Token 无效，请重新登录",
+        )
+
+    await check_anon_ai_quota(request)
 
 
 async def check_ai_quota(user: User, db: AsyncSession) -> User:

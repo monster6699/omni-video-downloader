@@ -10,15 +10,20 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+type ApiFetchOptions = RequestInit & { timeoutMs?: number }
+
+async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  const { timeoutMs, signal: userSignal, ...rest } = options
   const token = await getToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...((options.headers as Record<string, string>) || {}),
+    ...((rest.headers as Record<string, string>) || {}),
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
-  console.log(`[OmniDL] ${options.method || 'GET'} ${path} | auth: ${token ? 'yes' : 'NO'}`)
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  const signal =
+    timeoutMs != null ? AbortSignal.timeout(timeoutMs) : userSignal
+  console.log(`[OmniDL] ${rest.method || 'GET'} ${path} | auth: ${token ? 'yes' : 'NO'}`)
+  const res = await fetch(`${API_BASE}${path}`, { ...rest, headers, signal })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
     console.warn(`[OmniDL] ${path} → ${res.status}:`, body.detail)
@@ -69,10 +74,14 @@ export function fetchMindMap(url: string, text?: string, source?: string): Promi
   return apiFetch('/ai/mindmap', { method: 'POST', body: JSON.stringify(body) })
 }
 
+/** Subtitle translate can run many LLM batches server-side; allow long wait (popup stays open). */
+const TRANSLATE_TIMEOUT_MS = 900_000
+
 export function translateSubtitles(url: string, texts: string[], targetLang: string): Promise<TranslateResponse> {
   return apiFetch('/ai/translate', {
     method: 'POST',
     body: JSON.stringify({ url, texts, target_lang: targetLang }),
+    timeoutMs: TRANSLATE_TIMEOUT_MS,
   })
 }
 

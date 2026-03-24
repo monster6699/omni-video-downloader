@@ -9,6 +9,7 @@ import {
   fetchMindMap,
   fetchAiQuotaStatus,
   QuotaExhaustedError,
+  extractApiErrorMessage,
   type SubtitleResponse,
   type SummaryResponse,
   type MindMapResponse,
@@ -63,7 +64,7 @@ function handleQuotaError(e: unknown): string {
     quotaMessage.value = e.message
     return e.message
   }
-  return (e as any)?.response?.data?.detail || (e as any)?.message || '生成失败'
+  return extractApiErrorMessage(e) || '生成失败'
 }
 
 async function runAnalysis() {

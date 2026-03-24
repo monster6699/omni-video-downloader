@@ -193,10 +193,16 @@ async function handleTranslate() {
           </span>
           <div class="flex-1 min-w-0">
             <span class="text-sm text-[var(--color-text)] leading-relaxed block">{{ item.text }}</span>
-            <span
-              v-if="translations[item._idx]"
-              class="text-xs text-indigo-600/80 leading-relaxed block mt-0.5"
-            >{{ translations[item._idx] }}</span>
+            <template v-if="translations.length > item._idx">
+              <span
+                v-if="translations[item._idx]"
+                class="text-xs text-indigo-600/80 leading-relaxed block mt-0.5"
+              >{{ translations[item._idx] }}</span>
+              <span
+                v-else-if="item.text.trim()"
+                class="text-xs text-amber-600/80 leading-relaxed block mt-0.5"
+              >（本行无译文，可再点「翻译」重试）</span>
+            </template>
           </div>
           <svg class="shrink-0 mt-0.5 opacity-0 group-hover:opacity-50 transition-opacity" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>

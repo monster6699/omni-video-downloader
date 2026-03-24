@@ -1,13 +1,13 @@
+import asyncio
 import hashlib
 import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_optional_user
-from app.core.database import get_db
+from app.core.database import async_session
 from app.core.redis import get_redis
 from app.models.user import User
 from app.core.config import settings
@@ -33,11 +33,20 @@ from app.services.ai_service import (
     stream_chat,
     translate_subtitles,
 )
-from app.services.persist_service import get_video_by_url, record_ai_task
+from app.services.persist_service import persist_ai_task_for_url
 from app.services.subtitle_service import extract_subtitles, get_video_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _translate_cache_key(url: str, target_lang: str, texts: list[str]) -> str:
+    """Include subtitle body fingerprint — URL-only keys caused misalignment when
+    line count/splitting changed but Redis still returned an old translation array."""
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
+    payload = json.dumps(texts, ensure_ascii=False).encode("utf-8")
+    content_hash = hashlib.sha256(payload).hexdigest()[:24]
+    return f"translate:v2:{url_hash}:{target_lang}:{content_hash}"
 
 
 @router.get("/usage-rules", response_model=UsageRulesResponse)
@@ -116,7 +125,6 @@ async def api_get_subtitles(req: AIRequest):
 async def api_get_summary(
     req: AIRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
 ):
     try:
@@ -130,22 +138,18 @@ async def api_get_summary(
         if not text.strip():
             raise ValueError("该视频暂无可用内容，无法生成总结")
 
-        await check_ai_llm_access(user, db, request)
+        async with async_session() as db:
+            db_user = await db.get(User, user.id) if user else None
+            await check_ai_llm_access(db_user, db, request)
 
         summary = generate_summary(text, source=source)
 
-        try:
-            video = await get_video_by_url(db, req.url)
-            await record_ai_task(
-                db,
-                task_type="summary",
-                user_id=user.id if user else None,
-                video_id=video.id if video else None,
-                status="done",
-                result_snapshot=json.dumps(summary, ensure_ascii=False)[:2000],
-            )
-        except Exception:
-            logger.warning("Failed to persist AI task", exc_info=True)
+        await persist_ai_task_for_url(
+            url=req.url,
+            task_type="summary",
+            user_id=user.id if user else None,
+            result_snapshot=json.dumps(summary, ensure_ascii=False)[:2000],
+        )
 
         return SummaryResponse(**summary)
     except ValueError as e:
@@ -161,7 +165,6 @@ async def api_get_summary(
 async def api_get_mindmap(
     req: AIRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
 ):
     try:
@@ -175,22 +178,18 @@ async def api_get_mindmap(
         if not text.strip():
             raise ValueError("该视频暂无可用内容，无法生成思维导图")
 
-        await check_ai_llm_access(user, db, request)
+        async with async_session() as db:
+            db_user = await db.get(User, user.id) if user else None
+            await check_ai_llm_access(db_user, db, request)
 
         markdown = generate_mindmap(text, source=source)
 
-        try:
-            video = await get_video_by_url(db, req.url)
-            await record_ai_task(
-                db,
-                task_type="mindmap",
-                user_id=user.id if user else None,
-                video_id=video.id if video else None,
-                status="done",
-                result_snapshot=markdown[:2000] if markdown else None,
-            )
-        except Exception:
-            logger.warning("Failed to persist AI task", exc_info=True)
+        await persist_ai_task_for_url(
+            url=req.url,
+            task_type="mindmap",
+            user_id=user.id if user else None,
+            result_snapshot=markdown[:2000] if markdown else None,
+        )
 
         return MindMapResponse(markdown=markdown)
     except ValueError as e:
@@ -206,7 +205,6 @@ async def api_get_mindmap(
 async def api_translate_subtitles(
     req: TranslateRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
 ):
     try:
@@ -214,19 +212,35 @@ async def api_translate_subtitles(
             raise ValueError("没有提供字幕文本")
 
         redis = get_redis()
-        url_hash = hashlib.md5(req.url.encode()).hexdigest()[:12]
-        cache_key = f"translate:{url_hash}:{req.target_lang}"
+        cache_key = _translate_cache_key(req.url, req.target_lang, req.texts)
 
         if redis:
             cached = await redis.get(cache_key)
             if cached:
-                return TranslateResponse(
-                    translations=json.loads(cached), target_lang=req.target_lang
-                )
+                try:
+                    arr = json.loads(cached)
+                    if (
+                        isinstance(arr, list)
+                        and len(arr) == len(req.texts)
+                    ):
+                        return TranslateResponse(
+                            translations=arr, target_lang=req.target_lang
+                        )
+                    logger.warning(
+                        "translate cache ignored: len %s vs request %s",
+                        len(arr) if isinstance(arr, list) else type(arr),
+                        len(req.texts),
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("translate cache corrupt, ignoring", exc_info=True)
 
-        await check_ai_llm_access(user, db, request)
+        async with async_session() as db:
+            db_user = await db.get(User, user.id) if user else None
+            await check_ai_llm_access(db_user, db, request)
 
-        translations = translate_subtitles(req.texts, req.target_lang)
+        translations = await asyncio.to_thread(
+            translate_subtitles, req.texts, req.target_lang
+        )
 
         if redis:
             await redis.set(
@@ -235,17 +249,11 @@ async def api_translate_subtitles(
                 ex=21600,
             )
 
-        try:
-            video = await get_video_by_url(db, req.url)
-            await record_ai_task(
-                db,
-                task_type="translate",
-                user_id=user.id if user else None,
-                video_id=video.id if video else None,
-                status="done",
-            )
-        except Exception:
-            logger.warning("Failed to persist AI task", exc_info=True)
+        await persist_ai_task_for_url(
+            url=req.url,
+            task_type="translate",
+            user_id=user.id if user else None,
+        )
 
         return TranslateResponse(
             translations=translations, target_lang=req.target_lang
@@ -263,7 +271,6 @@ async def api_translate_subtitles(
 async def api_chat(
     req: ChatRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
 ):
     try:
@@ -275,19 +282,15 @@ async def api_chat(
                 yield "data: [DONE]\n\n"
             return StreamingResponse(empty_stream(), media_type="text/event-stream")
 
-        await check_ai_llm_access(user, db, request)
+        async with async_session() as db:
+            db_user = await db.get(User, user.id) if user else None
+            await check_ai_llm_access(db_user, db, request)
 
-        try:
-            video = await get_video_by_url(db, req.url)
-            await record_ai_task(
-                db,
-                task_type="chat",
-                user_id=user.id if user else None,
-                video_id=video.id if video else None,
-                status="done",
-            )
-        except Exception:
-            logger.warning("Failed to persist AI task", exc_info=True)
+        await persist_ai_task_for_url(
+            url=req.url,
+            task_type="chat",
+            user_id=user.id if user else None,
+        )
 
         return StreamingResponse(
             stream_chat(text, req.question, req.history),

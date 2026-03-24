@@ -61,10 +61,10 @@ async def get_optional_user(
     try:
         payload = decode_access_token(token)
         user_id = int(payload["sub"])
-        return await get_user_by_id(db, user_id)
-    except Exception:
-        logger.warning("get_optional_user: token present but invalid", exc_info=True)
+    except (InvalidTokenError, KeyError, ValueError):
+        logger.warning("get_optional_user: token present but invalid JWT", exc_info=True)
         return None
+    return await get_user_by_id(db, user_id)
 
 
 # ------------------------------------------------------------------ endpoints

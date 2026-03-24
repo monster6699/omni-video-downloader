@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { Search, Link as LinkIcon, CheckCircle2, Loader2, Sparkles } from 'lucide-vue-next'
 import { parseVideo, downloadVideo, getTaskStatus, type VideoInfo, type TaskStatus } from '../api/video'
@@ -7,6 +8,8 @@ import VideoResult from '../components/VideoResult.vue'
 import AIPanel from '../components/AIPanel.vue'
 
 const message = useMessage()
+const route = useRoute()
+const router = useRouter()
 const url = ref('')
 const loading = ref(false)
 const downloading = ref(false)
@@ -44,6 +47,33 @@ watch(showAI, (v) => {
 })
 
 function fillUrl(link: string) { url.value = link }
+
+/** 插件「在网站上打开」等场景：/?url=encodeURIComponent(...) */
+function consumeUrlFromQuery() {
+  const raw = route.query.url
+  const q = Array.isArray(raw) ? raw[0] : raw
+  if (typeof q !== 'string' || !q.trim()) return
+  let decoded = q.trim()
+  try {
+    decoded = decodeURIComponent(decoded)
+  } catch {
+    /* 保持原样 */
+  }
+  if (!decoded) return
+  url.value = decoded
+  const rest = { ...route.query }
+  delete rest.url
+  router.replace({ path: route.path, query: rest })
+}
+
+onMounted(() => {
+  consumeUrlFromQuery()
+})
+
+watch(
+  () => route.query.url,
+  () => consumeUrlFromQuery(),
+)
 
 async function handleParse() {
   const trimmed = url.value.trim()

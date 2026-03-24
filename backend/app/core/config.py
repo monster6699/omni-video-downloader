@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "mysql+aiomysql://omni:omni123@localhost:3306/omni_video"
+    DATABASE_URL: str = "mysql+asyncmy://omni:omni123@localhost:3306/omni_video"
     REDIS_URL: str = "redis://localhost:6379/0"
     DOWNLOAD_DIR: str = "./downloads"
     DOWNLOAD_CACHE_HOURS: int = 3
@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = "https://api.deepseek.com"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "deepseek-chat"
+    # 字幕翻译单行合并请求时的 max_tokens 上限（过小易截断 JSON，表现为若干行空白「未翻译」）
+    TRANSLATE_MAX_OUTPUT_TOKENS: int = 8192
 
     # WeChat Pay
     WECHAT_MCH_ID: str = ""

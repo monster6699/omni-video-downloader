@@ -1,15 +1,9 @@
+import { isLikelyVideoPageUrl } from '../shared/videoUrlPatterns'
+
 const API_BASE = 'http://localhost:8000/api'
 
-const VIDEO_PATTERNS = [
-  /youtube\.com\/watch/, /youtu\.be\//,
-  /bilibili\.com\/video/, /douyin\.com\/video/,
-  /tiktok\.com\/@.+\/video/,
-  /twitter\.com\/.+\/status/, /x\.com\/.+\/status/,
-  /instagram\.com\/(p|reel)\//,
-]
-
 function isVideoPage(url: string): boolean {
-  return VIDEO_PATTERNS.some((p) => p.test(url))
+  return isLikelyVideoPageUrl(url)
 }
 
 async function getToken(): Promise<string | null> {

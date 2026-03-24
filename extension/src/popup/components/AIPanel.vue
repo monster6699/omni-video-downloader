@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { fetchSubtitle, fetchSummary, fetchMindMap, streamChat, translateSubtitles, ApiError } from '../../shared/api'
 import { getToken } from '../../shared/storage'
 import type { SummaryResponse, SubtitleResponse } from '../../shared/types'
@@ -41,6 +41,16 @@ const langOptions = [
   { label: 'Español', value: 'es' },
   { label: 'Deutsch', value: 'de' },
 ]
+
+/** 与后端每批约 24 条同级估算，仅作提示 */
+const translateBatchHint = computed(() => {
+  const n = subtitleData.value?.subtitles.length ?? 0
+  if (n <= 0) return ''
+  const batches = Math.max(1, Math.ceil(n / 24))
+  return batches > 1
+    ? `约 ${batches} 批请求（服务端并行），可能需要 1～5 分钟，请勿关闭弹窗`
+    : '通常很快完成'
+})
 
 const mindmapMarkdown = ref('')
 const mindmapLoading = ref(false)
@@ -156,7 +166,12 @@ function copySubtitleAll() {
       .map((s, i) => `${s.text}\n${translations.value[i] || ''}`)
       .join('\n\n')
   }
-  navigator.clipboard.writeText(text)
+  void navigator.clipboard.writeText(text)
+}
+
+function copySubtitleLine(original: string, translation: string | undefined) {
+  const payload = translation ? `${original}\n${translation}` : original
+  void navigator.clipboard.writeText(payload)
 }
 
 watch(() => props.url, () => { if (props.url) runAnalysis() }, { immediate: true })
@@ -237,6 +252,7 @@ watch(() => props.url, () => { if (props.url) runAnalysis() }, { immediate: true
               复制全部
             </button>
           </div>
+          <p v-if="translating" class="text-[10px] text-slate-500 mb-2 leading-snug">{{ translateBatchHint }}</p>
           <p v-if="translateError" class="text-red-500 text-[11px] mb-2">{{ translateError }}</p>
           <p v-else-if="translations.length" class="text-[10px] text-indigo-600 mb-2">已翻译为 {{ langOptions.find(o => o.value === targetLang)?.label }}</p>
           <div class="space-y-0.5 max-h-60 overflow-y-auto">
@@ -244,12 +260,15 @@ watch(() => props.url, () => { if (props.url) runAnalysis() }, { immediate: true
               v-for="(s, i) in subtitleData.subtitles"
               :key="i"
               class="flex gap-2.5 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
-              @click="navigator.clipboard.writeText(translations[i] ? `${s.text}\n${translations[i]}` : s.text)"
+              @click="copySubtitleLine(s.text, translations[i])"
             >
               <span class="text-[11px] font-mono text-indigo-500 shrink-0 pt-0.5 min-w-10">{{ formatTime(s.start) }}</span>
               <div class="min-w-0 flex-1">
                 <span class="text-xs text-slate-700 leading-relaxed block">{{ s.text }}</span>
-                <span v-if="translations[i]" class="text-[11px] text-indigo-600/90 leading-relaxed block mt-0.5">{{ translations[i] }}</span>
+                <template v-if="translations.length > i">
+                  <span v-if="translations[i]" class="text-[11px] text-indigo-600/90 leading-relaxed block mt-0.5">{{ translations[i] }}</span>
+                  <span v-else-if="s.text.trim()" class="text-[11px] text-amber-600/90 leading-relaxed block mt-0.5">（本行无译文，多为模型输出截断，可再点「翻译」重试）</span>
+                </template>
               </div>
             </div>
           </div>

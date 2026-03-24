@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { parseVideo, ApiError } from '../shared/api'
+import { isLikelyVideoPageUrl } from '../shared/videoUrlPatterns'
 import { getUser } from '../shared/storage'
 import type { VideoInfo, UserProfile } from '../shared/types'
 import VideoInfoCard from './components/VideoInfo.vue'
@@ -15,14 +16,7 @@ const error = ref('')
 const user = ref<UserProfile | null>(null)
 const showAI = ref(false)
 
-const VIDEO_PATTERNS = [
-  /youtube\.com\/watch/, /youtu\.be\//,
-  /bilibili\.com\/video/, /douyin\.com\/video/,
-  /tiktok\.com\/@.+\/video/,
-  /twitter\.com\/.+\/status/, /x\.com\/.+\/status/,
-  /instagram\.com\/(p|reel)\//,
-]
-const isVideoUrl = computed(() => VIDEO_PATTERNS.some((p) => p.test(currentUrl.value)))
+const isVideoUrl = computed(() => isLikelyVideoPageUrl(currentUrl.value))
 
 async function doParse() {
   if (!currentUrl.value || !isVideoUrl.value) return

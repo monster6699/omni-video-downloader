@@ -20,14 +20,27 @@ export class QuotaExhaustedError extends Error {
   }
 }
 
+/** Axios 可能把纯文本 500 放在 data 里（无 JSON detail），统一抽成可读文案 */
+export function extractApiErrorMessage(e: unknown): string {
+  if (axios.isAxiosError(e) && e.response) {
+    const d = e.response.data
+    if (typeof d === 'string' && d.trim()) return d.trim()
+    if (d && typeof d === 'object' && typeof (d as { detail?: unknown }).detail === 'string') {
+      return (d as { detail: string }).detail
+    }
+  }
+  if (e instanceof Error && e.message) return e.message
+  return '请求失败'
+}
+
 function handleApiError(e: unknown): never {
   if (axios.isAxiosError(e) && e.response?.status === 403) {
     throw new QuotaExhaustedError(
       e.response.data?.detail || '今日免费 AI 次数已用完，升级 VIP 无限使用',
     )
   }
-  if (axios.isAxiosError(e) && e.response?.status === 503) {
-    throw new Error(e.response.data?.detail || '服务暂不可用，请稍后再试')
+  if (axios.isAxiosError(e) && (e.response?.status === 503 || e.response?.status === 500)) {
+    throw new Error(extractApiErrorMessage(e))
   }
   throw e
 }

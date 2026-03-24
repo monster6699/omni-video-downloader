@@ -1,3 +1,16 @@
+# Chrome 插件开发说明
+
+> **与当前仓库一致（2026-03）**  
+> - 源码在 `extension/`，构建：`cd extension && npm run build`，在 Chrome **加载已解压的扩展程序** 时选择 **`extension/dist/`**（不是仓库根下的空目录）。  
+> - **Popup**：`src/popup/`（Vue 3 + Vite），入口 `index.html`；**Content**：`src/content/`（esbuild 打成一个 `content/index.js`）；**Background**：`src/background/index.ts` → `dist/background/index.js`。  
+> - **共享逻辑**：`src/shared/api.ts`（`Authorization: Bearer` + `localhost:8000/api`）、`storage.ts`（token/user）、**`videoUrlPatterns.ts`**（判断当前 Tab 是否为「视频页」——需与后端可解析的 URL 形态一致，例如抖音除 `/video/` 外还有 **`/jingxuan?modal_id=`**）。  
+> - 模板里不要直接写 `navigator.xxx`，应放到 `<script setup>` 的函数中，避免 `vue-tsc` 报「组件实例上不存在 navigator」。  
+> - 插件内「在网站上打开完整版」链接形如：`http://localhost:5173/?url=...`，网站首页会回填解析框（见 `project-status.md`）。
+
+下文保留原「目标与概念」说明，部分 manifest 路径为教学示例，**以仓库 `extension/manifest.json` 为准**。
+
+---
+
 # 🧠 一、插件要做什么（先定目标）
 
 你这个插件的核心是：
@@ -285,11 +298,10 @@ Chrome Web Store 对：
 
 # 🚀 九、上线流程
 
-1. 打开：
-    👉 `chrome://extensions/`
-2. 开启开发者模式
-3. 加载：
-    👉 `extension/` 文件夹
+1. 打开：`chrome://extensions/`
+2. 开启「开发者模式」
+3. 在仓库中执行 `cd extension && npm run build`
+4. 「加载已解压的扩展程序」选择 **`extension/dist/`** 目录（内含 `manifest.json`、`popup/`、`background/`、`content/`）
 
 ------
 

@@ -101,10 +101,14 @@
 
 | 变量 | 含义 |
 |------|------|
+| `DATABASE_URL` | 推荐 **`mysql+asyncmy://...`**；若仍写 `mysql+aiomysql://`，应用启动时会替换为 asyncmy（见 `app/core/database.py`） |
+| `TRANSLATE_MAX_OUTPUT_TOKENS` | 字幕翻译单次 `max_tokens` 上限（默认 `8192`），过小易导致返回截断、缺行 |
 | `ANON_AI_DAILY_LIMIT` | 访客每日 LLM 次数上限（默认 5） |
 | `REGISTER_DEFAULT_AI_QUOTA` | 与「注册默认 AI 次数」说明一致（默认 5，与库表默认对齐） |
 | `TASK_MODE` | **默认 `local`（开发）**：进程内线程池下载，**不启用 RQ**。生产可设 `queue` + 独立 Worker。 |
 | `WECHAT_*` / `ALIPAY_*` | 支付通道（见 `config.py`） |
+
+**数据库异常与前端**：`main.py` 将 **`DBAPIError`**（含连接断开、驱动协议错误等）统一为 **HTTP 503** + JSON `{"detail":"..."}`。网站 `api/ai.ts` 的 **`extractApiErrorMessage`** 会同时兼容纯文本错误体，避免界面只显示 `Internal Server Error`。
 
 ### `TASK_MODE=local`（推荐本地 / macOS 开发）
 

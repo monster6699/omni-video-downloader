@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 10080  # 7 days
     GOOGLE_CLIENT_ID: str = ""
 
-    # Task queue mode: "local" (asyncio.to_thread) or "queue" (RQ worker)
+    # Task queue mode: "local" (asyncio.to_thread, 开发默认，无 RQ/多进程) 或 "queue"（生产 RQ worker）
     TASK_MODE: str = "local"
 
     OPENAI_API_BASE: str = "https://api.deepseek.com"

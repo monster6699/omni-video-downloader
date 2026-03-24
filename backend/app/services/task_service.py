@@ -6,11 +6,14 @@ stays responsive for polling requests. Progress updates use a sync Redis connect
 inside the thread.
 """
 
+import app.core.macos_fork_safety  # noqa: F401 — RQ worker 不经过 main.py，须在此尽早设置
+
 import asyncio
 import contextlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -26,13 +29,61 @@ from app.services.bilibili_service import download_bilibili, parse_bilibili
 from app.services.douyin_service import download_douyin, parse_douyin
 from app.services.video_service import (
     DIRECT_LINK_PLATFORMS,
-    _safe_disk_name,
     _sanitize_filename,
     _url_hash,
     detect_platform,
 )
 
 logger = logging.getLogger(__name__)
+
+# 与磁盘文件名 `{url_hash}_{quality}.mp4` 对齐；升级后可废弃旧 `dl:{hash}:*` 脏缓存
+_DL_REDIS_CACHE_PREFIX = "dl:v2"
+
+# 专用于 task:{id} 进度字段：进程内单例，多线程安全；勿在下载流程里 close（queue Worker 与主线程并发写进度）
+_sync_progress_redis: sync_redis_mod.Redis | None = None
+_sync_progress_lock = threading.Lock()
+
+
+def _get_sync_redis_for_progress() -> sync_redis_mod.Redis:
+    global _sync_progress_redis
+    if _sync_progress_redis is None:
+        with _sync_progress_lock:
+            if _sync_progress_redis is None:
+                _sync_progress_redis = sync_redis_mod.from_url(
+                    settings.REDIS_URL,
+                    decode_responses=True,
+                )
+    return _sync_progress_redis
+
+
+def _write_task_progress(
+    task_id: str,
+    progress: int | str | None = None,
+    *,
+    mapping: dict[str, str] | None = None,
+) -> None:
+    """更新 Redis 中任务进度。与「缓存用」连接分离，避免多线程 + close 导致 queue Worker 下进度卡在 10。"""
+    try:
+        cli = _get_sync_redis_for_progress()
+        if mapping is not None:
+            cli.hset(f"task:{task_id}", mapping=mapping)
+        elif progress is not None:
+            cli.hset(f"task:{task_id}", "progress", str(progress))
+    except Exception as e:
+        logger.warning("Redis task progress write failed task=%s: %s", task_id, e)
+
+
+def _format_id_disk_suffix(format_id: str | None) -> str:
+    """Safe single path segment for a format / quality id."""
+    if not format_id:
+        return "best"
+    s = re.sub(r"[^a-zA-Z0-9._+-]", "_", str(format_id).strip())
+    return (s[:48] if s else "best") or "best"
+
+
+def _disk_name_for_quality(url_hash: str, format_id: str | None, ext: str = "mp4") -> str:
+    """One on-disk file per (video URL, quality). Avoids identical /file/... URLs and browser caching wrong quality."""
+    return f"{url_hash}_{_format_id_disk_suffix(format_id)}.{ext}"
 
 
 async def create_download_task(
@@ -51,6 +102,8 @@ async def create_download_task(
             "filename": "",
             "method": "",
             "error": "",
+            "url": url,
+            "format_id": format_id if format_id is not None else "",
         },
     )
     await redis.expire(f"task:{task_id}", settings.DOWNLOAD_CACHE_HOURS * 3600 + 600)
@@ -149,20 +202,22 @@ _RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError)
 
 
 @contextlib.contextmanager
-def _approximate_progress_while_downloading(
-    task_id: str, r: sync_redis_mod.Redis
-) -> Iterator[None]:
-    """B 站 / 抖音不用 yt-dlp，没有 progress_hooks；用后台线程缓慢推高进度，避免长期卡在 10。"""
+def _approximate_progress_while_downloading(task_id: str) -> Iterator[None]:
+    """B 站 / 抖音不用 yt-dlp，没有 progress_hooks；用后台线程缓慢推高进度，避免长期卡在 10。
+
+    注意：旧逻辑 ``while not stop.wait(2)`` 在下载于 2 秒内结束时，wait 因 stop 立即返回 True，
+    循环体一次都不执行，进度永远停在 10。改为先立刻推一次，再按「等 2s 或 stop」循环。
+    """
     stop = threading.Event()
-    current = [12]
+    current = [14]
 
     def pump() -> None:
-        while not stop.wait(2.0):
+        _write_task_progress(task_id, current[0])
+        while True:
+            if stop.wait(2.0):
+                break
             current[0] = min(current[0] + 4, 90)
-            try:
-                r.hset(f"task:{task_id}", "progress", str(current[0]))
-            except Exception:
-                pass
+            _write_task_progress(task_id, current[0])
 
     th = threading.Thread(target=pump, daemon=True)
     th.start()
@@ -170,7 +225,7 @@ def _approximate_progress_while_downloading(
         yield
     finally:
         stop.set()
-        th.join(timeout=1.0)
+        th.join(timeout=2.0)
 
 
 def _blocking_download(task_id: str, url: str, format_id: str | None) -> dict:
@@ -182,12 +237,15 @@ def _blocking_download(task_id: str, url: str, format_id: str | None) -> dict:
     r = sync_redis_mod.from_url(settings.REDIS_URL, decode_responses=True)
 
     try:
-        r.hset(f"task:{task_id}", mapping={"status": "downloading", "progress": "5"})
+        _write_task_progress(
+            task_id,
+            mapping={"status": "downloading", "progress": "5"},
+        )
 
         platform = detect_platform(url)
         url_hash = _url_hash(url)
         fmt_key = format_id or "best"
-        cache_key = f"dl:{url_hash}:{fmt_key}"
+        cache_key = f"{_DL_REDIS_CACHE_PREFIX}:{url_hash}:{fmt_key}"
 
         cached = r.get(cache_key)
         if cached:
@@ -204,12 +262,12 @@ def _blocking_download(task_id: str, url: str, format_id: str | None) -> dict:
             if direct:
                 return direct
 
-        r.hset(f"task:{task_id}", "progress", "10")
+        _write_task_progress(task_id, 10)
 
         last_error: Exception | None = None
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                result = _execute_download(task_id, url, format_id, platform, url_hash, r)
+                result = _execute_download(task_id, url, format_id, platform, url_hash)
                 break
             except _RETRYABLE_ERRORS as exc:
                 last_error = exc
@@ -219,7 +277,7 @@ def _blocking_download(task_id: str, url: str, format_id: str | None) -> dict:
                         "Task %s attempt %d failed (%s), retrying in %ds",
                         task_id, attempt + 1, exc, wait,
                     )
-                    r.hset(f"task:{task_id}", "progress", "10")
+                    _write_task_progress(task_id, 10)
                     time.sleep(wait)
                 else:
                     raise
@@ -254,30 +312,29 @@ def _execute_download(
     format_id: str | None,
     platform: str,
     url_hash: str,
-    r: sync_redis_mod.Redis,
 ) -> dict:
     """Core download logic, separated for retry wrapping."""
     if platform == "douyin":
         info = parse_douyin(url)
-        disk_name = _safe_disk_name(url_hash, "mp4")
+        disk_name = _disk_name_for_quality(url_hash, format_id)
         save_file = str(DOWNLOAD_PATH / disk_name)
-        with _approximate_progress_while_downloading(task_id, r):
+        with _approximate_progress_while_downloading(task_id):
             download_douyin(url, save_file)
         display_name = f"{_sanitize_filename(info['title'])}.mp4"
     elif platform == "bilibili":
         info = parse_bilibili(url)
-        disk_name = _safe_disk_name(url_hash, "mp4")
+        disk_name = _disk_name_for_quality(url_hash, format_id)
         save_file = str(DOWNLOAD_PATH / disk_name)
-        with _approximate_progress_while_downloading(task_id, r):
+        with _approximate_progress_while_downloading(task_id):
             download_bilibili(url, save_file, format_id)
         display_name = f"{_sanitize_filename(info['title'])}.mp4"
     else:
-        disk_name = _safe_disk_name(url_hash, "mp4")
+        fmt_seg = _format_id_disk_suffix(format_id)
         ydl_opts: dict = {
             "quiet": True,
             "no_warnings": True,
-            "outtmpl": str(DOWNLOAD_PATH / f"{url_hash}.%(ext)s"),
-            "progress_hooks": [_make_progress_hook(task_id, r)],
+            "outtmpl": str(DOWNLOAD_PATH / f"{url_hash}_{fmt_seg}.%(ext)s"),
+            "progress_hooks": [_make_progress_hook(task_id)],
         }
         if format_id:
             ydl_opts["format"] = format_id
@@ -341,7 +398,7 @@ def _try_direct(url: str, format_id: str | None, platform: str) -> dict | None:
         return None
 
 
-def _make_progress_hook(task_id: str, r: sync_redis_mod.Redis):
+def _make_progress_hook(task_id: str):
     """yt-dlp progress hook → Redis ``progress`` (throttled ~1/s).
 
     Many流式格式没有 ``total_bytes`` / ``estimate``，原先 ``if total`` 不成立时进度永远停在 10。
@@ -368,10 +425,7 @@ def _make_progress_hook(task_id: str, r: sync_redis_mod.Redis):
             progress = min(10 + int(elapsed * 1.5), 88)
 
         if progress > last_written[0]:
-            try:
-                r.hset(f"task:{task_id}", "progress", str(progress))
-            except Exception:
-                pass
+            _write_task_progress(task_id, progress)
             last_written[0] = progress
             last_tick[0] = now
 
@@ -382,16 +436,33 @@ def _make_progress_hook(task_id: str, r: sync_redis_mod.Redis):
 # RQ entry-point (used by task_dispatcher in queue mode)
 # ---------------------------------------------------------------------------
 
+def _task_params_from_redis(
+    r: sync_redis_mod.Redis, task_id: str, url: str, format_id: str | None
+) -> tuple[str, str | None]:
+    """RQ worker 与 API 进程分离，以 Redis 中 enqueue 时写入的字段为准，避免 job 参数序列化异常导致 format 丢失。"""
+    meta = r.hgetall(f"task:{task_id}") or {}
+    url_eff = (meta.get("url") or "").strip() or url
+    raw_fmt = meta.get("format_id")
+    if raw_fmt is None:
+        format_eff = format_id
+    elif raw_fmt == "":
+        format_eff = None
+    else:
+        format_eff = str(raw_fmt).strip() or None
+    return url_eff, format_eff
+
+
 def blocking_download_job(
     task_id: str, url: str, format_id: str | None = None, user_id: int | None = None
 ) -> dict:
     """Top-level function for RQ workers. The task_id and initial Redis state
     are set up by the dispatcher before enqueuing."""
-    r = sync_redis_mod.from_url(settings.REDIS_URL, decode_responses=True)
     try:
-        result = _blocking_download(task_id, url, format_id)
-        r.hset(
-            f"task:{task_id}",
+        cli = _get_sync_redis_for_progress()
+        url_eff, format_eff = _task_params_from_redis(cli, task_id, url, format_id)
+        result = _blocking_download(task_id, url_eff, format_eff)
+        _write_task_progress(
+            task_id,
             mapping={
                 "status": "done",
                 "progress": "100",
@@ -403,7 +474,8 @@ def blocking_download_job(
         return {"task_id": task_id, **result}
     except Exception as e:
         logger.exception("RQ job %s failed", task_id)
-        r.hset(f"task:{task_id}", mapping={"status": "failed", "error": str(e)})
+        _write_task_progress(
+            task_id,
+            mapping={"status": "failed", "error": str(e)},
+        )
         raise
-    finally:
-        r.close()

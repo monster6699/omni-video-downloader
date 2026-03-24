@@ -65,6 +65,9 @@
 
 ## 3. 下载任务进度（`/api/video/task/{task_id}`）
 
+- 同一视频**不同清晰度**使用**不同磁盘文件名**（`{url_hash}_{format}.mp4`），避免 `/api/video/file/...` URL 相同导致**浏览器仍播放旧缓存的 360P**。
+- 文件接口对视频响应头 **`Cache-Control: no-store`**。
+
 - 任务状态存 Redis：`task:{task_id}` 的 `progress` 字段 **0–100**。
 - **10%** 表示已进入 `_execute_download` 主流程；之后：
   - **yt-dlp**：`progress_hooks` 写入；若流式下载**无总字节数**，则用**时间估算**进度，避免长期卡在 10。
@@ -100,8 +103,35 @@
 |------|------|
 | `ANON_AI_DAILY_LIMIT` | 访客每日 LLM 次数上限（默认 5） |
 | `REGISTER_DEFAULT_AI_QUOTA` | 与「注册默认 AI 次数」说明一致（默认 5，与库表默认对齐） |
-| `TASK_MODE` | `local` / `queue`（RQ） |
+| `TASK_MODE` | **默认 `local`（开发）**：进程内线程池下载，**不启用 RQ**。生产可设 `queue` + 独立 Worker。 |
 | `WECHAT_*` / `ALIPAY_*` | 支付通道（见 `config.py`） |
+
+### `TASK_MODE=local`（推荐本地 / macOS 开发）
+
+- 无需 `rq worker`；`POST /api/video/download` 仍写 Redis 任务状态，由 **API 进程内** `asyncio.to_thread` 执行下载。
+- 避免 RQ 子进程与 macOS fork/ObjC 安全机制冲突。
+
+### `TASK_MODE=queue` 时（生产或压测）
+
+1. **安装依赖**：`pip install -r requirements.txt`（已包含 `rq`）。若仍报 `RQ is not installed`，在 venv 内重新执行安装。
+2. **单独起 Worker**（与 uvicorn 进程不同）：队列名为 `video_tasks`，需在项目根（或设置 `PYTHONPATH=backend`）执行，例如：
+   ```bash
+   cd backend && source venv/bin/activate
+   export PYTHONPATH=.
+   python rq_worker.py worker video_tasks
+   ```
+   或使用：`./scripts/rq-video-worker.sh`（shell 先 `export` + 同上 Python 入口）。
+   **勿在 macOS 上直接 `rq worker`**：`rq` 会先加载依赖，仅靠 `main.py` 里设环境变量往往太晚，仍会出现「Python 意外退出 / fork pre-exec」弹窗。
+   Worker 与 API 共用同一 `REDIS_URL`，否则任务会一直停在 pending。
+3. **macOS 上起 API**：勿用 `python -m uvicorn main:app`（uvicorn/watchfiles 先于 `main.py` 初始化）。请用：
+   ```bash
+   cd backend && export PYTHONPATH=. && python dev_uvicorn.py
+   ```
+   或：`./scripts/dev-uvicorn-macos.sh`。**`dev_uvicorn.py` 在 macOS 上默认关闭 `--reload`**（热重载会 fork 子进程，极易触发「Python 意外退出 / fork pre-exec」）；改代码后请手动重启进程。需要热重载时可加 `--reload`，但可能再次弹窗。
+   若必须用 `uvicorn` 命令，请在**同一终端**先执行 `export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`，并尽量**不要**加 `--reload`。
+4. **改代码后务必重启 Worker**：Worker 是独立进程，不随 uvicorn `--reload` 更新；未重启会仍跑旧逻辑（例如清晰度、缓存 key）。
+5. **清晰度参数**：enqueue 时会把 `url`、`format_id` 写入 Redis `task:{id}`；Worker 优先读 Redis，避免 RQ 序列化导致 `format_id` 丢失、始终落到默认画质。
+6. 下载文件 Redis 缓存 key 使用 **`dl:v2:`** 前缀；升级后旧 `dl:{hash}:*` 不再命中，避免指向已废弃的单文件路径。
 
 ---
 

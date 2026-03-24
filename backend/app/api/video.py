@@ -103,4 +103,8 @@ async def serve_file(disk_name: str, name: str | None = None):
         path=str(safe_path),
         filename=download_name,
         media_type="application/octet-stream",
+        headers={
+            # 同一视频多清晰度曾共用 URL，浏览器会缓存首次下载；禁止缓存视频本体
+            "Cache-Control": "no-store",
+        },
     )

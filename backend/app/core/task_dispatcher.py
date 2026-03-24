@@ -60,6 +60,9 @@ def _enqueue_rq(url: str, format_id: str | None, user_id: int | None) -> str:
             "method": "",
             "error": "",
             "user_id": str(user_id) if user_id else "",
+            # Worker 与 API 进程分离：以 Redis 为准解析 url/format，避免 RQ 传参异常导致清晰度错误
+            "url": url,
+            "format_id": format_id if format_id is not None else "",
         },
     )
     r.expire(f"task:{task_id}", settings.DOWNLOAD_CACHE_HOURS * 3600 + 600)

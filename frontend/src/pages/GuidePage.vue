@@ -46,6 +46,12 @@ onMounted(async () => {
       </div>
     </div>
 
+    <p class="mt-4 text-sm text-slate-600">
+      需要在本站外解析视频？可安装
+      <router-link to="/extension" class="text-indigo-600 hover:text-indigo-800 font-medium">浏览器插件</router-link>
+      ，查看下载与安装说明。
+    </p>
+
     <p v-if="loadError" class="mt-4 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
       <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
       {{ loadError }}

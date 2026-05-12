@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Generated extension bundle (run: npm run zip-extension)
+public/downloads/*.zip
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

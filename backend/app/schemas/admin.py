@@ -38,3 +38,16 @@ class AdminStats(BaseModel):
     today_downloads: int = 0
     today_ai_tasks: int = 0
     ai_type_distribution: dict[str, int] = {}
+
+
+class AdminVipPricing(BaseModel):
+    """Current VIP list prices (fen), same unit as payment orders."""
+
+    monthly_fen: int
+    yearly_fen: int
+    updated_at: datetime | None = None
+
+
+class AdminVipPricingUpdate(BaseModel):
+    monthly_fen: int
+    yearly_fen: int

@@ -25,6 +25,11 @@ const router = createRouter({
       name: 'guide',
       component: () => import('./pages/GuidePage.vue'),
     },
+    {
+      path: '/extension',
+      name: 'extension',
+      component: () => import('./pages/ExtensionPage.vue'),
+    },
   ],
 })
 

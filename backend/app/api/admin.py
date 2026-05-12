@@ -17,7 +17,10 @@ from app.schemas.admin import (
     AdminUserItem,
     AdminUserList,
     AdminUserUpdate,
+    AdminVipPricing,
+    AdminVipPricingUpdate,
 )
+from app.services.vip_pricing import get_site_settings, update_vip_prices_fen
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -149,4 +152,37 @@ async def get_stats(
         today_downloads=today_downloads,
         today_ai_tasks=today_ai_tasks,
         ai_type_distribution=ai_type_distribution,
+    )
+
+
+@router.get("/vip-pricing", response_model=AdminVipPricing)
+async def get_vip_pricing(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await get_site_settings(db)
+    return AdminVipPricing(
+        monthly_fen=row.vip_monthly_price_fen,
+        yearly_fen=row.vip_yearly_price_fen,
+        updated_at=row.updated_at,
+    )
+
+
+@router.put("/vip-pricing", response_model=AdminVipPricing)
+async def put_vip_pricing(
+    req: AdminVipPricingUpdate,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        row = await update_vip_prices_fen(db, req.monthly_fen, req.yearly_fen)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="价格无效：须为 1～99999999 分之间的整数",
+        )
+    return AdminVipPricing(
+        monthly_fen=row.vip_monthly_price_fen,
+        yearly_fen=row.vip_yearly_price_fen,
+        updated_at=row.updated_at,
     )

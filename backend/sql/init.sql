@@ -121,3 +121,17 @@ CREATE TABLE IF NOT EXISTS orders (
     INDEX idx_order_no (order_no),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- Site settings (singleton id=1): VIP list prices in fen
+-- ============================================================
+CREATE TABLE IF NOT EXISTS site_settings (
+    id                      INT          PRIMARY KEY,
+    vip_monthly_price_fen   INT          NOT NULL COMMENT '月度 VIP 标价（分）',
+    vip_yearly_price_fen    INT          NOT NULL COMMENT '年度 VIP 标价（分）',
+    updated_at              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO site_settings (id, vip_monthly_price_fen, vip_yearly_price_fen)
+VALUES (1, 990, 8800)
+ON DUPLICATE KEY UPDATE id = id;

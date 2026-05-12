@@ -15,25 +15,9 @@ from app.core.config import settings
 from app.core.datetime_utils import naive_utc, to_utc_aware, utc_now
 from app.models.order import Order
 from app.models.user import User
+from app.services.vip_pricing import PLAN_META
 
 logger = logging.getLogger(__name__)
-
-PLANS = {
-    "monthly": {
-        "id": "monthly",
-        "name": "月度 VIP",
-        "price": settings.VIP_MONTHLY_PRICE,
-        "duration_days": 30,
-        "description": "每月自动续费，随时取消",
-    },
-    "yearly": {
-        "id": "yearly",
-        "name": "年度 VIP",
-        "price": settings.VIP_YEARLY_PRICE,
-        "duration_days": 365,
-        "description": "年付更划算，省下一大笔",
-    },
-}
 
 
 def generate_order_no() -> str:
@@ -72,7 +56,7 @@ def create_wechat_native_order(order: Order) -> str | None:
     """Call WeChat Pay Native API and return code_url for QR code."""
     from wechatpayv3 import WeChatPayType
 
-    plan = PLANS[order.plan_id]
+    plan = PLAN_META[order.plan_id]
     wxpay = _get_wxpay()
     code, message = wxpay.pay(
         description=f"OmniVideo {plan['name']}",
@@ -210,7 +194,7 @@ def _get_alipay():
 
 def create_alipay_precreate_order(order: Order) -> str | None:
     """Call Alipay trade.precreate and return qr_code URL."""
-    plan = PLANS[order.plan_id]
+    plan = PLAN_META[order.plan_id]
     alipay = _get_alipay()
     amount_yuan = f"{order.amount / 100:.2f}"
     result = alipay.api_alipay_trade_precreate(
@@ -245,7 +229,7 @@ async def fulfill_order(order: Order, db: AsyncSession) -> None:
         logger.warning("Order %s already fulfilled (status=%s)", order.order_no, order.status)
         return
 
-    plan = PLANS[order.plan_id]
+    plan = PLAN_META[order.plan_id]
     duration = timedelta(days=plan["duration_days"])
 
     res = await db.execute(

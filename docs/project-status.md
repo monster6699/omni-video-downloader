@@ -99,7 +99,12 @@ omni-video-downloader/
 │       ├── background/                  # Service worker（角标、下载、消息）
 │       └── shared/                      # api.ts、storage、**videoUrlPatterns.ts**（与后端一致的「是否视频页」判断）
 ├── docker/
-│   └── docker-compose.yml
+│   ├── docker-compose.yml           # MySQL + Redis + backend + frontend + nginx
+│   ├── nginx.conf                 # /api 长超时 + /api/ai/chat SSE
+│   ├── .env.example
+│   ├── README.md                  # 启动方式与注意事项
+│   └── mysql/
+│       └── README.md              # 表结构来自 ../backend/sql/init.sql
 └── docs/
     ├── README.md                        # 文档索引
     ├── product-and-operations.md        # 产品规则与运维速查
@@ -152,12 +157,14 @@ omni-video-downloader/
 | GET  | `/api/admin/users` | 分页用户列表 + 搜索（需管理员） |
 | PUT  | `/api/admin/users/{id}` | 编辑用户 VIP/配额/管理员权限（需管理员） |
 | GET  | `/api/admin/stats` | 系统统计（用户数/VIP/今日下载/今日AI调用）（需管理员） |
+| GET  | `/api/admin/vip-pricing` | 读取当前 VIP 标价（分）：月度/年度（需管理员） |
+| PUT  | `/api/admin/vip-pricing` | 更新 VIP 标价（分）；对新订单立即生效（需管理员） |
 
 ### 支付（VIP）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/pay/plans` | 可售套餐列表 |
+| GET | `/api/pay/plans` | 可售套餐列表（价格来自 DB 表 `site_settings`，见 `backend/sql/README.md`） |
 | POST | `/api/pay/create` | 创建订单，返回扫码支付信息 |
 | GET | `/api/pay/status/{order_no}` | 订单支付状态（前端轮询） |
 | POST | `/api/pay/notify/wechat` | 微信支付异步通知 |
@@ -406,7 +413,7 @@ npm run dev                   # Vite 开发服务器 http://localhost:5173
 | **批量下载** | 多 URL 输入、并发或队列任务（依赖下载任务队列） | 未实现 |
 | **播放列表下载** | yt-dlp 解析 playlist，前端展示多集勾选再下载 | 未实现 |
 | **下载任务队列** | Redis 队列 + worker，异步下载、进度、失败重试 | ✅ 已实现：双模式调度器（local/queue）+ 重试逻辑 + 自动持久化 |
-| **完整 Docker 部署** | `docker-compose`：nginx（反向代理 + 静态前端）、frontend 镜像、MySQL、Redis、backend | 仅有 backend + redis |
+| **完整 Docker 部署** | `docker-compose`：nginx（反向代理 + 静态前端）、frontend 镜像、MySQL、Redis、backend | ✅ `docker/` 编排（**`docker/README.md`**）；DB 初始化挂载 **`backend/sql/init.sql`** |
 | **响应式/移动端** | 工具站布局在小屏可点可用（设计文档「响应式、支持移动端」） | 未专门适配 |
 | **API 对外服务** | 开放 API Key、按量计费、限流 （设计文档「未来扩展」） | 未实现 |
 | **企业版** | 私有化交付、批量接口、SLA（设计文档「未来扩展」） | 未实现 |
@@ -582,6 +589,7 @@ TEST 7: Frontend TypeScript Compilation
 | `GET /api/admin/users` | 分页用户列表 + 手机号/昵称/邮箱搜索 |
 | `PUT /api/admin/users/{id}` | 编辑 VIP/配额/管理员权限 |
 | `GET /api/admin/stats` | 统计：总用户/VIP数/今日下载/今日AI调用/AI类型分布 |
+| `GET/PUT /api/admin/vip-pricing` | 读取/更新 VIP 标价（分），见当前「管理员」接口表与 `backend/sql/README.md` |
 
 - User 模型新增 `is_admin` 字段
 - `require_admin` 依赖：非管理员返回 403
@@ -639,7 +647,7 @@ TEST 6: Admin API
 
 | # | 功能 | 工作量 | 说明 |
 |---|------|--------|------|
-| 14 | 完整 Docker 部署 | 中 | 补充 nginx（反向代理 + 静态资源）、frontend 构建镜像、MySQL 容器 |
+| 14 | 完整 Docker 部署 | 中 | ✅ `docker/` 已含 nginx + frontend + MySQL + Redis + backend（见 `docker/README.md`） |
 | 15 | 付费计费系统 | 大 | 三端支付接入，详见第十六节 |
 | 16 | API 对外服务 | 中 | API Key 管理、调用频率控制、用量统计 |
 | 17 | 企业版 | 大 | 私有部署方案、批量 API、SLA 保障 |
@@ -929,7 +937,7 @@ wechatpayv3>=1.2.0           # 微信支付 v3 SDK
 
 1. **数据库**: `orders` 表 — 订单号、用户、套餐、金额、支付方式、状态、交易号、二维码链接、支付时间
 2. **后端 Model**: `backend/app/models/order.py` (SQLAlchemy ORM)
-3. **Config**: `backend/app/core/config.py` 新增微信/支付宝参数 + VIP 定价
+3. **Config**: `backend/app/core/config.py` 新增微信/支付宝参数；VIP 标价默认种子见 `VIP_MONTHLY_PRICE` / `VIP_YEARLY_PRICE`（分），**线上以 `site_settings` 为准**，管理后台可改
 4. **支付服务**: `backend/app/services/pay_service.py`
    - 微信 Native 下单 (`create_wechat_native_order`) — 返回 `code_url`
    - 支付宝当面付 (`create_alipay_precreate_order`) — 返回 `qr_code`
@@ -947,7 +955,8 @@ wechatpayv3>=1.2.0           # 微信支付 v3 SDK
 8. **VIP 弹窗**: `frontend/src/components/VipModal.vue` — 从导航栏"开通 VIP"按钮触发
 9. **路由**: `/pricing` 加入 `router.ts`
 10. **App.vue**: 未登录与已登录用户均显示 VIP 入口；已登录 VIP 显示「VIP 套餐」与「套餐与续费」链接
-11. **users.vip_plan_id**: 字段 + `sql/migrate_vip_plan_id.sql`（已有库需执行迁移）；定价页 / VIP 弹窗展示「已是当前套餐」
+11. **users.vip_plan_id**: 字段已合并进 `sql/init.sql`；定价页 / VIP 弹窗展示「已是当前套餐」
+12. **`site_settings` + 后台改价**: 表已合并进 `sql/init.sql`；`GET/PUT /api/admin/vip-pricing`；管理后台「VIP 定价」区块；`GET /api/pay/plans` 与下单金额读数据库（详见 [`backend/sql/README.md`](../backend/sql/README.md)）
 
 ### 测试结果
 
@@ -973,7 +982,11 @@ wechatpayv3>=1.2.0           # 微信支付 v3 SDK
 
 ### 故障排查：登录报 `Unknown column 'users.vip_plan_id'`
 
-已在代码中增加字段，**已有数据库需执行一次** [`backend/sql/migrate_vip_plan_id.sql`](../backend/sql/migrate_vip_plan_id.sql)（详见同目录 [`README.md`](../backend/sql/README.md)）。
+字段已并入 [`backend/sql/init.sql`](../backend/sql/init.sql)。当前推荐部署方式为重建库后直接执行 `init.sql`（详见 [`backend/sql/README.md`](../backend/sql/README.md)）。
+
+### 故障排查：缺少 `site_settings` 或需初始化 VIP 标价表
+
+`site_settings` 已并入 [`backend/sql/init.sql`](../backend/sql/init.sql)。当前推荐部署方式为重建库后直接执行 `init.sql`（说明见 [`backend/sql/README.md`](../backend/sql/README.md)）。
 
 ### 故障排查：微信已支付但订单 `status` 仍为 `pending`
 

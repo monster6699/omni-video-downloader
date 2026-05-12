@@ -13,6 +13,7 @@ import {
   BookOpen,
   House,
   Tags,
+  Puzzle,
 } from 'lucide-vue-next'
 import LoginModal from './components/LoginModal.vue'
 import VipModal from './components/VipModal.vue'
@@ -83,6 +84,14 @@ function goHome() {
               使用说明
             </router-link>
             <router-link
+              to="/extension"
+              class="hover:text-indigo-600 transition-colors inline-flex items-center gap-1.5"
+              active-class="text-indigo-600 font-semibold"
+            >
+              <Puzzle class="w-3.5 h-3.5 shrink-0 opacity-90" stroke-width="2" />
+              浏览器插件
+            </router-link>
+            <router-link
               v-if="isLoggedIn"
               to="/history"
               class="hover:text-indigo-600 transition-colors inline-flex items-center gap-1.5"
@@ -116,6 +125,13 @@ function goHome() {
             >
               <BookOpen class="w-3.5 h-3.5 shrink-0" stroke-width="2" />
               说明
+            </router-link>
+            <router-link
+              to="/extension"
+              class="md:hidden inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-indigo-600"
+            >
+              <Puzzle class="w-3.5 h-3.5 shrink-0" stroke-width="2" />
+              插件
             </router-link>
             <!-- 未登录 -->
             <template v-if="!isLoggedIn">

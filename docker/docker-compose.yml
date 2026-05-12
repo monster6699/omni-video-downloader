@@ -1,30 +1,40 @@
-version: "3.8"
+# OmniVideo — 本地/小团队一键栈：MySQL + Redis + API + 静态前端 + 反向代理
+# 使用：cd docker && cp .env.example .env && 编辑 .env 后 docker compose up -d --build
+# 说明：见同目录 README.md；Chrome 扩展不在此编排内（本机构建 extension/dist 后加载）
+
+name: omni-video
 
 services:
   mysql:
     image: mysql:8.0
-    restart: always
+    restart: unless-stopped
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_allowed_packet=256M
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
       MYSQL_DATABASE: omni_video
       MYSQL_USER: omni
-      MYSQL_PASSWORD: omni123
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-omni123}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # 与 ORM / 业务一致的全量表结构（勿再用旧版精简 init）
+      - ../backend/sql/init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
-    restart: always
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -35,15 +45,23 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    restart: always
+    restart: unless-stopped
     environment:
-      DATABASE_URL: mysql+asyncmy://omni:omni123@mysql:3306/omni_video
+      DATABASE_URL: mysql+asyncmy://omni:${MYSQL_PASSWORD:-omni123}@mysql:3306/omni_video
       REDIS_URL: redis://redis:6379/0
       DOWNLOAD_DIR: /app/downloads
-      DOWNLOAD_CACHE_HOURS: 3
-      CORS_ORIGINS: '["http://localhost","http://localhost:5173"]'
+      DOWNLOAD_CACHE_HOURS: "3"
+      TASK_MODE: ${TASK_MODE:-local}
+      # 前端 docker 经 80 访问 + 本机 Vite 5173 连容器 API 时需含 5173；覆盖请在 .env 写一行 CORS_ORIGINS='["http://你的域名"]'
+      CORS_ORIGINS: '["http://localhost","http://127.0.0.1","http://localhost:5173","http://127.0.0.1:5173"]'
+      JWT_SECRET: ${JWT_SECRET:-change-me-docker-compose}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-10080}
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.deepseek.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
+      TRANSLATE_MAX_OUTPUT_TOKENS: ${TRANSLATE_MAX_OUTPUT_TOKENS:-8192}
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - downloads_data:/app/downloads
     depends_on:
@@ -56,17 +74,19 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    restart: always
+    restart: unless-stopped
+    expose:
+      - "80"
     depends_on:
       - backend
 
   nginx:
     image: nginx:alpine
-    restart: always
+    restart: unless-stopped
     ports:
-      - "80:80"
+      - "${HTTP_PORT:-80}:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - frontend
       - backend

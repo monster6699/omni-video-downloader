@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     ALIPAY_PUBLIC_KEY: str = ""
     ALIPAY_NOTIFY_URL: str = ""
 
-    # VIP pricing (unit: fen / 分)
+    # VIP pricing (fen): seed when DB row site_settings id=1 is created lazily; live prices are in DB
     VIP_MONTHLY_PRICE: int = 990
     VIP_YEARLY_PRICE: int = 8800
 

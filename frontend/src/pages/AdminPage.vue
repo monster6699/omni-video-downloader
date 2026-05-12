@@ -3,11 +3,13 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Shield, Users, Download, Sparkles, Search, Crown,
-  Loader2, ChevronLeft, ChevronRight, Pencil, X, Check,
+  Loader2, ChevronLeft, ChevronRight, Pencil, X, Check, Banknote,
 } from 'lucide-vue-next'
 import {
   fetchAdminUsers,
   fetchAdminStats,
+  fetchAdminVipPricing,
+  updateAdminVipPricing,
   updateAdminUser,
   type AdminUserItem,
   type AdminStats,
@@ -32,6 +34,13 @@ const editForm = ref<AdminUserUpdate>({})
 /** datetime-local 字符串，与 editForm.vip_expire_at 同步提交 */
 const editVipExpireLocal = ref('')
 const saving = ref(false)
+
+const vipMonthlyYuan = ref<number | string>('')
+const vipYearlyYuan = ref<number | string>('')
+const vipPricingUpdatedAt = ref<string | null>(null)
+const vipPricingLoading = ref(false)
+const vipPricingSaving = ref(false)
+const vipPricingError = ref('')
 
 const aiTypeLabels: Record<string, string> = {
   summary: '总结',
@@ -61,6 +70,47 @@ async function loadStats() {
     stats.value = await fetchAdminStats()
   } catch {
     /* silent */
+  }
+}
+
+async function loadVipPricing() {
+  vipPricingLoading.value = true
+  vipPricingError.value = ''
+  try {
+    const d = await fetchAdminVipPricing()
+    vipMonthlyYuan.value = d.monthly_fen / 100
+    vipYearlyYuan.value = d.yearly_fen / 100
+    vipPricingUpdatedAt.value = d.updated_at
+  } catch {
+    vipPricingError.value = 'VIP 定价加载失败'
+  } finally {
+    vipPricingLoading.value = false
+  }
+}
+
+async function saveVipPricing() {
+  const m = Number(vipMonthlyYuan.value)
+  const y = Number(vipYearlyYuan.value)
+  const mf = Math.round(m * 100)
+  const yf = Math.round(y * 100)
+  if (!Number.isFinite(m) || !Number.isFinite(y) || mf < 1 || yf < 1) {
+    vipPricingError.value = '请输入有效的价格（元），最低 ¥0.01'
+    return
+  }
+  vipPricingSaving.value = true
+  vipPricingError.value = ''
+  try {
+    const d = await updateAdminVipPricing({ monthly_fen: mf, yearly_fen: yf })
+    vipMonthlyYuan.value = d.monthly_fen / 100
+    vipYearlyYuan.value = d.yearly_fen / 100
+    vipPricingUpdatedAt.value = d.updated_at
+  } catch (e: unknown) {
+    const d = (e as { response?: { data?: { detail?: string | string[] } } })?.response?.data
+      ?.detail
+    const msg = Array.isArray(d) ? d.join('；') : d
+    vipPricingError.value = typeof msg === 'string' && msg ? msg : '保存失败'
+  } finally {
+    vipPricingSaving.value = false
   }
 }
 
@@ -128,6 +178,7 @@ onMounted(async () => {
   }
   loadUsers()
   loadStats()
+  loadVipPricing()
 })
 </script>
 
@@ -183,6 +234,58 @@ onMounted(async () => {
           </span>
         </div>
       </div>
+    </div>
+
+    <!-- VIP 定价 -->
+    <div class="bg-white border border-slate-200 rounded-2xl p-6 mb-8">
+      <div class="flex items-center gap-2 mb-1">
+        <Banknote class="w-5 h-5 text-amber-600" />
+        <h2 class="text-lg font-semibold text-slate-900">VIP 定价</h2>
+      </div>
+      <p class="text-sm text-slate-500 mb-4">
+        月度 / 年度套餐在定价页与支付弹窗中展示的价格（单位：元）。保存后立即对<strong>新订单</strong>生效；已创建的待支付订单金额不变。
+      </p>
+      <div v-if="vipPricingLoading" class="py-8 flex justify-center">
+        <Loader2 class="w-6 h-6 text-violet-500 animate-spin" />
+      </div>
+      <template v-else>
+        <div class="grid sm:grid-cols-2 gap-4 max-w-xl">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1.5">月度 VIP（元）</label>
+            <input
+              v-model.number="vipMonthlyYuan"
+              type="number"
+              min="0.01"
+              step="0.01"
+              class="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 tabular-nums"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1.5">年度 VIP（元）</label>
+            <input
+              v-model.number="vipYearlyYuan"
+              type="number"
+              min="0.01"
+              step="0.01"
+              class="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 tabular-nums"
+            />
+          </div>
+        </div>
+        <p v-if="vipPricingUpdatedAt" class="text-xs text-slate-400 mt-3">
+          最近更新：{{ new Date(vipPricingUpdatedAt).toLocaleString('zh-CN') }}
+        </p>
+        <p v-if="vipPricingError" class="text-sm text-red-600 mt-3">{{ vipPricingError }}</p>
+        <button
+          type="button"
+          :disabled="vipPricingSaving"
+          class="mt-4 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60 rounded-xl transition-colors"
+          @click="saveVipPricing"
+        >
+          <Loader2 v-if="vipPricingSaving" class="w-4 h-4 animate-spin" />
+          <Check v-else class="w-4 h-4" />
+          保存定价
+        </button>
+      </template>
     </div>
 
     <!-- Search -->

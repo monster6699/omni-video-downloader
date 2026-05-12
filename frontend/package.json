@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "zip-extension": "node scripts/zip-extension.mjs"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
@@ -21,6 +22,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "archiver": "^7.0.1",
     "@tailwindcss/vite": "^4.2.1",
     "@types/node": "^24.12.0",
     "@types/qrcode": "^1.5.6",

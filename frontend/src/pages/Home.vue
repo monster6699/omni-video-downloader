@@ -2,7 +2,7 @@
 import { ref, watch, computed, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { Search, Link as LinkIcon, CheckCircle2, Loader2, Sparkles } from 'lucide-vue-next'
+import { Search, Link as LinkIcon, CheckCircle2, Loader2, Sparkles, Puzzle } from 'lucide-vue-next'
 import { parseVideo, downloadVideo, getTaskStatus, type VideoInfo, type TaskStatus } from '../api/video'
 import VideoResult from '../components/VideoResult.vue'
 import AIPanel from '../components/AIPanel.vue'
@@ -167,6 +167,15 @@ function triggerFileDownload(status: TaskStatus) {
       </h1>
       <p class="text-slate-500 text-lg max-w-2xl mx-auto">
         粘贴视频链接，智能解析，支持多种清晰度下载。轻松获取 YouTube、Bilibili、抖音、TikTok... 随时随地，想下就下。
+      </p>
+      <p class="text-sm text-slate-500">
+        <router-link
+          to="/extension"
+          class="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 font-medium"
+        >
+          <Puzzle class="w-4 h-4 shrink-0" stroke-width="2" />
+          安装浏览器插件
+        </router-link>
       </p>
 
       <!-- Input -->

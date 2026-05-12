@@ -67,3 +67,22 @@ export async function fetchAdminStats(): Promise<AdminStats> {
   const { data } = await api.get<AdminStats>('/admin/stats')
   return data
 }
+
+export interface AdminVipPricing {
+  monthly_fen: number
+  yearly_fen: number
+  updated_at: string | null
+}
+
+export async function fetchAdminVipPricing(): Promise<AdminVipPricing> {
+  const { data } = await api.get<AdminVipPricing>('/admin/vip-pricing')
+  return data
+}
+
+export async function updateAdminVipPricing(payload: {
+  monthly_fen: number
+  yearly_fen: number
+}): Promise<AdminVipPricing> {
+  const { data } = await api.put<AdminVipPricing>('/admin/vip-pricing', payload)
+  return data
+}

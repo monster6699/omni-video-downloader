@@ -18,7 +18,6 @@ from app.schemas.pay import (
     PlanInfo,
 )
 from app.services.pay_service import (
-    PLANS,
     create_alipay_precreate_order,
     create_wechat_native_order,
     fetch_alipay_trade_no_if_paid,
@@ -28,14 +27,16 @@ from app.services.pay_service import (
     verify_alipay_notify,
     verify_wechat_notify,
 )
+from app.services.vip_pricing import plans_for_api, price_fen_for_plan, valid_plan_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.get("/plans", response_model=list[PlanInfo])
-async def list_plans():
-    return [PlanInfo(**p) for p in PLANS.values()]
+async def list_plans(db: AsyncSession = Depends(get_db)):
+    raw = await plans_for_api(db)
+    return [PlanInfo(**p) for p in raw]
 
 
 @router.post("/create", response_model=CreateOrderResponse)
@@ -44,17 +45,17 @@ async def create_order(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if req.plan_id not in PLANS:
+    if not valid_plan_id(req.plan_id):
         raise HTTPException(status_code=400, detail="无效的套餐")
     if req.pay_method not in ("wechat", "alipay"):
         raise HTTPException(status_code=400, detail="无效的支付方式")
 
-    plan = PLANS[req.plan_id]
+    amount = await price_fen_for_plan(db, req.plan_id)
     order = Order(
         order_no=generate_order_no(),
         user_id=user.id,
         plan_id=req.plan_id,
-        amount=plan["price"],
+        amount=amount,
         pay_method=req.pay_method,
         status="pending",
     )
